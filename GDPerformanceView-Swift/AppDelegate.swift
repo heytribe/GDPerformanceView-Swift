@@ -23,13 +23,23 @@
 import UIKit
 
 @UIApplicationMain
-class AppDelegate: UIResponder, UIApplicationDelegate {
+class AppDelegate: UIResponder, UIApplicationDelegate, GDPerformanceMonitorDelegate {
 
     var window: UIWindow?
 
     var performanceView: GDPerformanceMonitor?
     
+    func performanceMonitorAdditionalStrings() -> [String] {
+        return ["Toto"]
+    }
+    
+    func performanceMonitorDidReport(fpsValue: Int, cpuValue: Float) {
+        
+    }
+    
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplicationLaunchOptionsKey: Any]?) -> Bool {
+        
+        GDPerformanceMonitor.sharedInstance.delegate = self
         
     #if DEBUG
         GDPerformanceMonitor.sharedInstance.startMonitoring()
