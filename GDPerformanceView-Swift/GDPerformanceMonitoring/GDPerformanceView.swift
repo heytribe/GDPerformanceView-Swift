@@ -268,7 +268,7 @@ internal class GDPerformanceView: UIWindow {
         var threadStatistic: UInt32 = 0
         
         kern = withUnsafeMutablePointer(to: &threadList) {
-            $0.withMemoryRebound(to: (thread_act_array_t?.self)!, capacity: 1) {
+            $0.withMemoryRebound(to: (thread_act_array_t?.self), capacity: 1) {
                 task_threads(mach_task_self_, $0, &threadCount)
             }
         }
@@ -319,6 +319,10 @@ internal class GDPerformanceView: UIWindow {
     }
     
     private func updateMonitoringLabel(fpsUsage: Int, cpuUsage: Float) {
+        
+        if self.monitoringTextLabel.superview == nil {
+            return
+        }
         
         var strings = [
             String(format: "FPS : %d", fpsUsage),
