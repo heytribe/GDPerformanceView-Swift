@@ -1,5 +1,5 @@
 //
-// Copyright © 2016 Gavrilov Daniil
+// Copyright © 2017 Gavrilov Daniil
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,8 @@ import UIKit
 import QuartzCore
 
 internal class GDPerformanceView: UIWindow {
+    
+    internal typealias MemoryUsageTuple = (usedMemory: UInt64, totalMemory: UInt64)
     
     // MARK: Public Properties
     
@@ -69,14 +71,14 @@ internal class GDPerformanceView: UIWindow {
     
     private var screenUpdatesBeginTime: CFTimeInterval = 0.0
     
-    private var averageScreenUpdatesTime: CFTimeInterval = 0.017
+    private var averageScreenUpdatesTime: CFTimeInterval = 0.018
     
     private var versionsString: String = ""
     
     // MARK: Init Methods & Superclass Overriders
     
     internal init() {
-        super.init(frame: GDPerformanceView.windowFrame())
+        super.init(frame: GDPerformanceView.windowFrame(withPrefferedHeight: 20.0))
         
         self.setupWindowAndDefaultVariables()
         self.setupDisplayLink()
@@ -205,7 +207,7 @@ internal class GDPerformanceView: UIWindow {
     
     private func setupTextLayers() {
         self.monitoringTextLabel.textAlignment = NSTextAlignment.center
-        self.monitoringTextLabel.numberOfLines = 2
+        self.monitoringTextLabel.numberOfLines = 0
         self.monitoringTextLabel.backgroundColor = .black
         self.monitoringTextLabel.textColor = .white
         self.monitoringTextLabel.clipsToBounds = true
@@ -235,7 +237,10 @@ internal class GDPerformanceView: UIWindow {
                 let updatesOverSecond = screenUpdatesTime - 1.0
                 let framesOverSecond = Int(updatesOverSecond / self.averageScreenUpdatesTime)
                 
-                self.screenUpdatesCount -= framesOverSecond;
+                self.screenUpdatesCount -= framesOverSecond
+                if self.screenUpdatesCount < 0 {
+                    self.screenUpdatesCount = 0
+                }
                 
                 self.takeReadings()
             }
@@ -245,12 +250,13 @@ internal class GDPerformanceView: UIWindow {
     private func takeReadings() {
         let fps = self.screenUpdatesCount
         let cpu = self.cpuUsage()
+        let memory = self.memoryUseage()
         
         self.screenUpdatesCount = 0
         self.screenUpdatesBeginTime = 0.0
         
-        self.report(fpsUsage: fps, cpuUsage: cpu)
-        self.updateMonitoringLabel(fpsUsage: fps, cpuUsage: cpu)
+        self.report(fpsUsage: fps, cpuUsage: cpu, memory: memory)
+        self.updateMonitoringLabel(fpsUsage: fps, cpuUsage: cpu, memory: memory)
     }
     
     private func cpuUsage() -> Float {
@@ -268,9 +274,14 @@ internal class GDPerformanceView: UIWindow {
         var threadStatistic: UInt32 = 0
         
         kern = withUnsafeMutablePointer(to: &threadList) {
-            $0.withMemoryRebound(to: (thread_act_array_t?.self), capacity: 1) {
-                task_threads(mach_task_self_, $0, &threadCount)
-            }
+            #if swift(>=3.1)
+                return $0.withMemoryRebound(to: thread_act_array_t?.self, capacity: 1) {
+                    task_threads(mach_task_self_, $0, &threadCount)
+                }
+            #else
+                return $0.withMemoryRebound(to: (thread_act_array_t?.self)!, capacity: 1) {
+                    task_threads(mach_task_self_, $0, &threadCount)
+                }
         }
         if kern != KERN_SUCCESS {
             return -1
@@ -304,22 +315,52 @@ internal class GDPerformanceView: UIWindow {
         return totalUsageOfCPU
     }
     
+    private func memoryUseage() -> MemoryUsageTuple {
+        var taskInfo = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size)/4
+        let result: kern_return_t = withUnsafeMutablePointer(to: &taskInfo) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        
+        var used: UInt64 = 0
+        if result == KERN_SUCCESS {
+            used = UInt64(taskInfo.resident_size)
+        }
+        
+        let total = ProcessInfo.processInfo.physicalMemory
+        return (used, total)
+    }
+    
     // MARK: Other Methods
     
-    class func windowFrame() -> CGRect {
+    class func windowFrame(withPrefferedHeight height: CGFloat) -> CGRect {
         var frame = CGRect.zero
         if let window = UIApplication.shared.delegate?.window {
-            frame = CGRect(x: 0.0, y: 0.0, width: window!.bounds.width, height: 20.0)
+            var topInset: CGFloat = 0.0
+            if #available(iOS 11.0, *), let safeAreaTop = window?.rootViewController?.view.safeAreaInsets.top {
+                if safeAreaTop >= 14.0 {
+                    topInset = safeAreaTop - 14.0
+                } else {
+                    topInset = safeAreaTop
+                }
+            }
+            
+            frame = CGRect(x: 0.0, y: topInset, width: window!.bounds.width, height: height)
         }
         return frame
     }
     
-    private func report(fpsUsage: Int, cpuUsage: Float) {
-        self.performanceDelegate?.performanceMonitorDidReport(fpsValue: fpsUsage, cpuValue: cpuUsage)
+    private func report(fpsUsage: Int, cpuUsage: Float, memory: MemoryUsageTuple) {
+        self.performanceDelegate?.performanceMonitorDidReport(fpsValue: fpsUsage, cpuValue: cpuUsage, usedMemory: memory.usedMemory, totalMemory: memory.totalMemory)
     }
-    
-    private func updateMonitoringLabel(fpsUsage: Int, cpuUsage: Float) {
-        
+
+    private func updateMonitoringLabel(fpsUsage: Int, cpuUsage: Float, memory: MemoryUsageTuple) {
+        let free = Float(memory.usedMemory) / Float(1024 * 1024)
+        let total = Float(memory.totalMemory) / Float(1024 * 1024)
+        let monitoringString = String(format: "FPS : %d, CPU : %.1f%%\nmemory used : %.1f, total : %.0f", fpsUsage, cpuUsage, free, total)
+
         if self.monitoringTextLabel.superview == nil {
             return
         }
@@ -341,13 +382,17 @@ internal class GDPerformanceView: UIWindow {
     private func layoutTextLabel() {
         let windowWidth = self.bounds.width
         let windowHeight = self.bounds.height
-        let labelSize = self.monitoringTextLabel.sizeThatFits(CGSize(width: windowWidth, height: windowHeight))
+        let labelSize = self.monitoringTextLabel.sizeThatFits(CGSize(width: windowWidth, height: CGFloat.greatestFiniteMagnitude))
+        
+        if windowHeight != labelSize.height {
+            self.frame = GDPerformanceView.windowFrame(withPrefferedHeight: self.monitoringTextLabel.bounds.height)
+        }
         
         self.monitoringTextLabel.frame = CGRect(x: (windowWidth - labelSize.width) / 2.0, y: (windowHeight - labelSize.height) / 2.0, width: labelSize.width, height: labelSize.height)
     }
     
     private func layoutWindow() {
-        self.frame = GDPerformanceView.windowFrame()
+        self.frame = GDPerformanceView.windowFrame(withPrefferedHeight: self.monitoringTextLabel.bounds.height)
         self.layoutTextLabel()
     }
     
@@ -367,14 +412,14 @@ internal class GDPerformanceView: UIWindow {
             let systemVersion = UIDevice.current.systemVersion
             
             if !self.appVersionHidden && !self.deviceVersionHidden {
-                versionsString = "\napp v\(applicationVersion) (\(applicationBuild)); iOS v\(systemVersion)"
+                versionsString = "\napp v\(applicationVersion) (\(applicationBuild)), iOS v\(systemVersion)"
             } else if !self.appVersionHidden {
                 versionsString = "\napp v\(applicationVersion) (\(applicationBuild))"
             } else if !self.deviceVersionHidden {
                 versionsString = "\niOS v\(systemVersion)"
             }
         } else {
-            self.versionsString = "";
+            self.versionsString = ""
         }
     }
     

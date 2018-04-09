@@ -1,5 +1,5 @@
 //
-// Copyright © 2016 Gavrilov Daniil
+// Copyright © 2017 Gavrilov Daniil
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
 //
 
 public protocol GDPerformanceMonitorDelegate: class {
-    func performanceMonitorDidReport(fpsValue: Int, cpuValue: Float)
+    /** Memory unit is byte. */
+    func performanceMonitorDidReport(fpsValue: Int, cpuValue: Float, usedMemory: UInt64, totalMemory: UInt64)
     func performanceMonitorAdditionalStrings() -> [String]
 }
